@@ -18,7 +18,8 @@
 	url = https://github.com/iovisor/ubpf
 [submodule "vm/llvm-jit"]
 	path = vm/llvm-jit
-	url = https://gitlab.kylincloud.org/lizhun/llvmbpf.git
+	url = https://github.com/Storage-and-OS-for-AI/llvmbpf.git
+	branch = gprobe
 [submodule ".agents/sources/agent-skills"]
 	path = .agents/sources/agent-skills
 	url = https://github.com/eunomia-bpf/agent-skills.git
