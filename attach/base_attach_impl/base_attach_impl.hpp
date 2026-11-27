@@ -1,0 +1,142 @@
+#ifndef _GPROBE_BASE_ATTACH_IMPL_HPP
+#define _GPROBE_BASE_ATTACH_IMPL_HPP
+
+#include "spdlog/spdlog.h"
+#include <cstdint>
+#include <cerrno>
+#include <functional>
+#include <optional>
+#include "attach_private_data.hpp"
+#include <stdexcept>
+namespace gprobe
+{
+namespace attach
+{
+using override_return_set_callback = std::function<void(uint64_t, uint64_t)>;
+
+// Used by filter to record the return value
+// Use inline thread_local to ensure ODR
+inline thread_local std::optional<override_return_set_callback>
+	curr_thread_override_return_callback;
+// Function address exposed while an attach callback is running.
+inline thread_local uintptr_t current_thread_attach_func_ip = 0;
+
+// A signal backend supplies already allocated callback state. Keep only a
+// trivially initialized pointer in static TLS: accessing this path must not
+// call __tls_get_addr or register a TLS destructor after late dlopen.
+struct signal_callback_context {
+	uintptr_t function_ip = 0;
+	std::optional<uint64_t> cookie;
+	void (*override_return)(uint64_t, uint64_t) = nullptr;
+};
+#if defined(__linux__)
+__attribute__((tls_model("initial-exec")))
+#endif
+inline thread_local signal_callback_context *current_signal_callback = nullptr;
+#if defined(__linux__)
+__attribute__((tls_model("initial-exec")))
+#endif
+inline thread_local unsigned signal_handler_depth = 0;
+
+// A wrapper function for an entry function of an ebpf program
+using ebpf_run_callback = std::function<int(void *memory, size_t memory_size,
+					    uint64_t *return_value)>;
+
+// A callback to register bpf helpers
+using ebpf_helper_register_callback =
+	std::function<int(unsigned index, const char *name, void *func)>;
+// The base of all attach implementations
+class base_attach_impl {
+    public:
+	// Detach a certain attach entry by a local attach id
+	virtual int detach_by_id(int id) = 0;
+
+	// Create an attach entry with an ebpf callback. To avoid messing up the
+	// code base, we don't use gprobe_prog here, instead, we require a
+	// callback accept the same argument as gprobe_prog::run The callback
+	// would be called if the attach entry is triggered. The specific attach
+	// impl will be responsible for preparing arguments to the ebpf program.
+	virtual int create_attach_with_ebpf_callback(
+		ebpf_run_callback &&cb, const attach_private_data &private_data,
+		int attach_type) = 0;
+
+	// Allocate a new attach entry id
+	int allocate_id()
+	{
+		return next_id++;
+	}
+
+	// Attach manager will call this function, so that attach impls could
+	// register their custom helpers
+	virtual void
+	register_custom_helpers(ebpf_helper_register_callback register_callback)
+	{
+	}
+
+	/// Call some features provide by specified attach implementation.
+	virtual void *call_attach_specific_function(const std::string &name,
+						    void *data)
+	{
+		SPDLOG_WARN(
+			"Not implemented yet: call_attach_specific_function");
+		return nullptr;
+	}
+
+	virtual ~base_attach_impl(){};
+
+    private:
+	int next_id = 1;
+};
+} // namespace attach
+} // namespace gprobe
+
+// The use of extern "C" allows the function to be called from C code
+extern "C" {
+
+// Set the return value of the current context
+inline uint64_t gprobe_set_retval(uint64_t value)
+{
+	using namespace gprobe::attach;
+	if (auto *ctx = current_signal_callback) {
+		if (!ctx->override_return)
+			return (uint64_t)-EINVAL;
+		ctx->override_return(0, value);
+		return 0;
+	}
+	if (curr_thread_override_return_callback.has_value()) {
+		curr_thread_override_return_callback.value()(0, value);
+	} else {
+		spdlog::error(
+			"Called gprobe_set_retval, but no retval callback was set");
+		throw std::invalid_argument(
+			"Called gprobe_set_retval, but no retval callback was set");
+	}
+	return 0;
+}
+
+// Override the return value of the current context
+inline uint64_t gprobe_override_return(uint64_t ctx, uint64_t value)
+{
+	using namespace gprobe::attach;
+	if (auto *signal_ctx = current_signal_callback) {
+		if (!signal_ctx->override_return)
+			return (uint64_t)-EINVAL;
+		signal_ctx->override_return(ctx, value);
+		return 0;
+	}
+	if (curr_thread_override_return_callback.has_value()) {
+		spdlog::debug("Overriding return value for ctx {:x} with {}",
+			      ctx, value);
+		curr_thread_override_return_callback.value()(ctx, value);
+	} else {
+		spdlog::error(
+			"Called gprobe_override_return, but no retval callback was set");
+		throw std::invalid_argument(
+			"Called gprobe_override_return, but no retval callback was set");
+	}
+	return 0;
+}
+
+} // extern "C"
+
+#endif

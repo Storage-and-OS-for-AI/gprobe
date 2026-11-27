@@ -1,0 +1,4 @@
+.output
+*.o
+vec_add
+maca_simple_counter

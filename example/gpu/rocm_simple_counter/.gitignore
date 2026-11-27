@@ -1,0 +1,4 @@
+.output
+*.o
+vec_add
+rocm_simple_counter

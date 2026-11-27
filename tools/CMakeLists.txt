@@ -1,0 +1,8 @@
+add_subdirectory(gprobetool)
+if(GPROBE_ENABLE_FRIDA)
+  add_subdirectory(cli)
+endif()
+if(GPROBE_LLVM_JIT AND GPROBE_BUILD_WITH_LIBBPF)
+  message(STATUS "Using llvm-jit")
+  add_subdirectory(aot)
+endif()

@@ -1,0 +1,4 @@
+/rocm_two_probe
+/.output
+/vec_add
+/victim*

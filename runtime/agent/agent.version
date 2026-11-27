@@ -1,0 +1,4 @@
+{
+    global: injected_with_frida; gprobe_hooked_main; __libc_start_main; gprobe_agent_main; gprobe_agent_control; syscall_callback; _gprobe__setup_syscall_trace_callback; __cudaRegisterFatBinary;
+    local: *;
+};
